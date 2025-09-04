@@ -17,7 +17,7 @@ import time
 import threading
 from pathlib import Path
 from az.paths import *
-from az.utils import log, ensure, safe_dir_name, read_json, write_json_atomic
+from az.utils import ensure, safe_dir_name, read_json, write_json_atomic
 from az.bookmarks import export_pinned_bookmarks
 
 # ---------- Paths (macOS) ----------
