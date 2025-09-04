@@ -5,7 +5,20 @@ from .utils import ensure, read_json
 def export_pinned_bookmarks(out_html: Path, space_title: str | None = None):
     ensure(out_html.parent)
     data = read_json(ARC_SIDEBAR)
-    html = _convert_json_to_html_legacy(data, space_title)
+    
+    # Create a mapping from profile display names to space names
+    # This is needed because Arc profile names don't match sidebar space names
+    profile_to_space_mapping = {
+        "Main": "Home",        # Main profile maps to Home space
+        "Business": "Awaiten", # Business profile maps to Awaiten space  
+        "School": "School",    # School profile maps to School space
+        "sync.": "sync.",      # sync. profile maps to sync. space
+    }
+    
+    # Use the mapping to get the correct space name
+    mapped_space_title = profile_to_space_mapping.get(space_title, space_title)
+    
+    html = _convert_json_to_html_legacy(data, mapped_space_title)
     with out_html.open("w", encoding="utf-8") as f:
         f.write(html)
 
@@ -69,15 +82,8 @@ def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_title: str | N
             "children": recurse_into_children(space_id),
         }
         bookmarks["bookmarks"].append(space_folder)
-    # Fallback: if filter produced nothing, include all pinned
-    if space_title is not None and not bookmarks["bookmarks"]:
-        for space_id, space_name in spaces["pinned"].items():
-            space_folder = {
-                "title": space_name,
-                "type": "folder",
-                "children": recurse_into_children(space_id),
-            }
-            bookmarks["bookmarks"].append(space_folder)
+    # No fallback - if filter produced nothing, return empty bookmarks
+    # This ensures profile isolation and prevents combining bookmarks from all profiles
     return bookmarks
 
 def _convert_bookmarks_to_html_legacy(bookmarks: dict) -> str:

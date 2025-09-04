@@ -7,11 +7,9 @@ Export Arc Browser profiles into cross‑browser importable artifacts, with opti
   - bookmarks HTML (NETSCAPE format; importable by most browsers)
   - passwords CSV (widely importable)
   - cards CSV (reference only)
-  - optional cookies.sqlite for Firefox/Zen (`--import-cookies`)
-  - optional extensions report and suggested `policies.json` for Firefox/Zen (experimental)
-- Optional: copies Arc profiles into new Chrome/Chromium profiles (non‑destructive), including:
+- Copies Arc profiles into new Chrome/Chromium profiles (non‑destructive), including:
   - passwords/cards merged into the Chrome profile (re‑encrypted with Chrome key)
-  - extensions copied and registered so Chrome installs from the Web Store on launch (themes skipped)
+  - extensions install is EXPERIMENTAL and disabled by default (see below)
 
 ### Requirements
 - macOS
@@ -20,7 +18,7 @@ Export Arc Browser profiles into cross‑browser importable artifacts, with opti
 - OpenSSL CLI available (for Chromium v10 decryption)
 
 ### Quick start
-1) Fully quit Chrome (Cmd+Q).
+1) Fully quit Chrome and Arc (Cmd+Q).
 2) Run:
 ```bash
 python3 main.py
@@ -40,6 +38,9 @@ python3 main.py --experimental-amo-mapping
 
 # Experimental: export cookies.sqlite per profile (Firefox/Zen)
 python3 main.py --import-cookies
+
+# Experimental: attempt per‑profile Chrome extension install (UNSTABLE)
+python3 main.py --experimental-extensions
 ```
 
 ### Outputs
@@ -51,16 +52,6 @@ python3 main.py --import-cookies
   - optional `cookies_<ts>.sqlite` (Firefox/Zen)
 - Chrome/Chromium (optional): `~/Library/Application Support/Google/Chrome/Profile N`
 
-### Troubleshooting
-- Extensions not showing in Chrome (when using Chrome import):
-  - Ensure Chrome was fully closed before running.
-  - Relaunch Chrome and switch to the newly created profile. Give it a minute; external descriptors will trigger installs.
-  - If still missing, quit Chrome and remove the target profile’s `Secure Preferences` file, then relaunch. Check `chrome://policy` for blocks.
-- Profiles too large:
-  - The tool skips heavy site-data (Cache, Code Cache, GPUCache, IndexedDB, Storage, File System, Media Cache, etc.). New Chrome profiles should be a few hundred MB, not multi‑GB.
-- Passwords/cards merge errors (Chrome import):
-  - macOS Keychain access for “Arc Safe Storage”/“Chrome Safe Storage” may be required.
-
 ### Scope and formats
 - By default, exports are generic/portable and not Firefox‑specific.
 - Firefox/Zen‑specific artifacts are only created when you use the optional flags:
@@ -68,7 +59,10 @@ python3 main.py --import-cookies
   - `--experimental-amo-mapping` → suggests Firefox/Zen `policies.json`
   - No direct extension install to Firefox/Zen is performed.
 
-### Notes
-- The script is non-destructive: existing Chrome profiles are untouched; new ones are created with the next free index.
-- All outputs are written in paths ignored by `.gitignore`.
-- This project is licensed under the MIT License.
+### Experimental features (status: currently broken)
+- `--experimental-extensions`: Per‑profile extension preinstall for Chrome. Due to Chrome integrity checks and policy scope, automated installs may not complete or may require manual confirmation in each profile.
+- `--experimental-amo-mapping`: Tries to map Chrome extensions to AMO and write suggested policies.
+- `--import-cookies`: Exports Arc cookies into a Firefox‑format database.
+
+### Contribution
+Contributions are welcome! Please feel free to submit a pull request. This project is licensed under the MIT License.
