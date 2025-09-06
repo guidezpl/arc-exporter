@@ -327,14 +327,14 @@ def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[s
         # Get the regular bookmarks for this space
         space_children = recurse_into_children(space_id)
 
-        # Add "Today tabs" subfolder if there are open tabs for this space
+        # Add "Today Tabs" subfolder if there are open tabs for this space
         if space_name in tabs_by_space and tabs_by_space[space_name]:
             today_tabs_folder = {
-                "title": "Today tabs",
+                "title": "Today Tabs",
                 "type": "folder",
                 "children": tabs_by_space[space_name],
             }
-            # Insert "Today tabs" at the beginning
+            # Insert "Today Tabs" at the beginning
             space_children.insert(0, today_tabs_folder)
 
         space_folder = {
