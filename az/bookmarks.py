@@ -130,6 +130,7 @@ def _extract_today_tabs_by_space(json_data: dict, spaces: dict) -> dict:
     """
     Extract currently opened tabs organized by space.
     Only includes unpinned tabs (open tabs), not pinned bookmarks.
+    Handles both individual tabs and tabGroups (subfolders).
 
     Args:
         json_data: The StorableSidebar.json data
@@ -141,44 +142,124 @@ def _extract_today_tabs_by_space(json_data: dict, spaces: dict) -> dict:
     tabs_by_space = {}
     containers = json_data.get("sidebar", {}).get("containers", [])
 
-    # Create a reverse mapping from unpinned container ID to space name
-    # Only include unpinned containers for today tabs
-    container_to_space = {}
-    for container_id, space_name in spaces["unpinned"].items():
-        container_to_space[container_id] = space_name
+    if len(containers) < 2:
+        return tabs_by_space
 
-    # Look through all containers for items with tab data
-    for container in containers:
-        if isinstance(container, dict) and "items" in container:
-            items = container["items"]
-            # Items come in pairs: ID, item_data
-            for i in range(0, len(items), 2):
-                if i + 1 >= len(items):
-                    break
+    # Get the main container that holds all items
+    main_container = containers[1]
+    if not isinstance(main_container, dict) or "items" not in main_container:
+        return tabs_by_space
 
-                item_data = items[i + 1]
-                if not isinstance(item_data, dict):
-                    continue
+    items_list = main_container["items"]
 
-                # Check if this item has tab data and is in an unpinned container
-                if "data" in item_data and "tab" in item_data["data"]:
-                    tab = item_data["data"]["tab"]
-                    saved_title = tab.get("savedTitle", "")
-                    saved_url = tab.get("savedURL", "")
-                    parent_id = item_data.get("parentID", "")
+    # Build item dictionary for fast lookup
+    item_dict = {}
+    for i in range(0, len(items_list), 2):
+        if i + 1 >= len(items_list):
+            break
+        item_id = items_list[i]
+        item_data = items_list[i + 1]
+        if isinstance(item_data, dict):
+            item_dict[item_id] = item_data
 
-                    if saved_title and saved_url and parent_id:
-                        # Only include tabs from unpinned containers (actual open tabs)
-                        space_name = container_to_space.get(parent_id)
-                        if space_name:
-                            if space_name not in tabs_by_space:
-                                tabs_by_space[space_name] = []
+    # Helper function to recursively extract tabs from containers and tabGroups
+    def extract_tabs_from_container(container_id: str, space_name: str) -> list:
+        """Extract tabs from a container, handling both individual tabs and tabGroups."""
+        result = []
 
-                            tabs_by_space[space_name].append({
+        if container_id not in item_dict:
+            return result
+
+        container_item = item_dict[container_id]
+        children_ids = container_item.get("childrenIds", [])
+
+        for child_id in children_ids:
+            if child_id not in item_dict:
+                continue
+
+            child_item = item_dict[child_id]
+
+            if "data" not in child_item:
+                continue
+
+            child_data = child_item["data"]
+
+            # Handle individual tabs
+            if "tab" in child_data:
+                tab = child_data["tab"]
+                saved_title = tab.get("savedTitle", "")
+                saved_url = tab.get("savedURL", "")
+
+                if saved_title and saved_url:
+                    result.append({
+                        "title": saved_title,
+                        "type": "bookmark",
+                        "url": saved_url,
+                    })
+
+            # Handle tabGroups (subfolders)
+            elif "tabGroup" in child_data:
+                tabgroup = child_data["tabGroup"]
+                folder_title = tabgroup.get("title", child_item.get("title", "Unnamed Folder"))
+
+                # Recursively extract tabs from the tabGroup
+                folder_tabs = []
+                tabgroup_children_ids = child_item.get("childrenIds", [])
+
+                for tab_id in tabgroup_children_ids:
+                    if tab_id not in item_dict:
+                        continue
+
+                    tab_item = item_dict[tab_id]
+
+                    # Handle direct tabs
+                    if "data" in tab_item and "tab" in tab_item["data"]:
+                        tab = tab_item["data"]["tab"]
+                        saved_title = tab.get("savedTitle", "")
+                        saved_url = tab.get("savedURL", "")
+
+                        if saved_title and saved_url:
+                            folder_tabs.append({
                                 "title": saved_title,
                                 "type": "bookmark",
                                 "url": saved_url,
                             })
+
+                    # Handle splitView items (which contain tabs as children)
+                    elif "data" in tab_item and "splitView" in tab_item["data"]:
+                        splitview_children_ids = tab_item.get("childrenIds", [])
+                        for splitview_child_id in splitview_children_ids:
+                            if splitview_child_id not in item_dict:
+                                continue
+
+                            splitview_child = item_dict[splitview_child_id]
+                            if "data" in splitview_child and "tab" in splitview_child["data"]:
+                                tab = splitview_child["data"]["tab"]
+                                saved_title = tab.get("savedTitle", "")
+                                saved_url = tab.get("savedURL", "")
+
+                                if saved_title and saved_url:
+                                    folder_tabs.append({
+                                        "title": saved_title,
+                                        "type": "bookmark",
+                                        "url": saved_url,
+                                    })
+
+                # Add the folder with its tabs if it has any tabs
+                if folder_tabs:
+                    result.append({
+                        "title": folder_title,
+                        "type": "folder",
+                        "children": folder_tabs,
+                    })
+
+        return result
+
+    # Extract tabs for each space's unpinned container
+    for container_id, space_name in spaces["unpinned"].items():
+        space_tabs = extract_tabs_from_container(container_id, space_name)
+        if space_tabs:
+            tabs_by_space[space_name] = space_tabs
 
     return tabs_by_space
 
