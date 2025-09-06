@@ -133,24 +133,24 @@ class ChromeProfileMonitor:
         self.monitor_thread = None
         self.log_file = Path("chrome_monitor.log")
         self.last_state = {}
-
+        
     def start_monitoring(self):
         """Start monitoring Chrome profiles in a separate thread"""
         if self.monitoring:
             return
-
+            
         self.monitoring = True
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
         log("Started Chrome profile monitoring", "OK")
-
+        
     def stop_monitoring(self):
         """Stop monitoring"""
         self.monitoring = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=1)
         log("Stopped Chrome profile monitoring", "OK")
-
+        
     def _monitor_loop(self):
         """Main monitoring loop"""
         while self.monitoring:
@@ -160,17 +160,17 @@ class ChromeProfileMonitor:
             except Exception as e:
                 self._log(f"Monitor error: {e}")
                 time.sleep(5)
-
+                
     def _check_profile_state(self):
         """Check current state of Chrome profiles"""
         current_state = self._get_current_state()
-
+        
         # Compare with last state
         if self.last_state:
             self._detect_changes(self.last_state, current_state)
-
+            
         self.last_state = current_state
-
+        
     def _get_current_state(self):
         """Get current state of Chrome profiles"""
         state = {
@@ -178,7 +178,7 @@ class ChromeProfileMonitor:
             'local_state': {},
             'timestamp': time.time()
         }
-
+        
         # Check profile directories
         chrome_root = Path.home() / 'Library/Application Support/Google/Chrome'
         if chrome_root.exists():
@@ -191,7 +191,7 @@ class ChromeProfileMonitor:
                         'files': len(list(item.rglob('*'))),
                         'data_files': self._check_data_files(item)
                     }
-
+        
         # Check Local State
         local_state_path = chrome_root / 'Local State'
         if local_state_path.exists():
@@ -201,9 +201,9 @@ class ChromeProfileMonitor:
                 state['local_state'] = local_state.get('profile', {}).get('info_cache', {})
             except Exception as e:
                 state['local_state'] = {'error': str(e)}
-
+                
         return state
-
+        
     def _check_data_files(self, profile_dir):
         """Check if critical data files exist"""
         data_files = ['History', 'Web Data', 'Login Data', 'Cookies', 'Preferences']
@@ -215,54 +215,54 @@ class ChromeProfileMonitor:
                 'size': file_path.stat().st_size if file_path.exists() else 0
             }
         return result
-
+        
     def _detect_changes(self, old_state, new_state):
         """Detect changes between states"""
         # Check for deleted profiles
         old_profiles = set(old_state['profiles'].keys())
         new_profiles = set(new_state['profiles'].keys())
-
+        
         deleted = old_profiles - new_profiles
         created = new_profiles - old_profiles
-
+        
         if deleted:
             self._log(f"🚨 PROFILES DELETED: {deleted}")
             for profile in deleted:
                 self._log(f"  Profile {profile} was deleted!")
-
+                
         if created:
             self._log(f"📁 PROFILES CREATED: {created}")
-
+            
         # Check for Local State changes
         old_local = old_state.get('local_state', {})
         new_local = new_state.get('local_state', {})
-
+        
         if old_local != new_local:
             self._log(f"🔄 LOCAL STATE CHANGED")
             old_keys = set(old_local.keys())
             new_keys = set(new_local.keys())
-
+            
             removed_keys = old_keys - new_keys
             added_keys = new_keys - old_keys
-
+            
             if removed_keys:
                 self._log(f"  Removed from Local State: {removed_keys}")
             if added_keys:
                 self._log(f"  Added to Local State: {added_keys}")
-
+                
     def _log(self, message):
         """Log message to file and console"""
         timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_message = f"[{timestamp}] {message}"
-
+        
         # Log to file
         with open(self.log_file, 'a') as f:
             f.write(log_message + '\n')
-
+            
         # Log to console only when verbose
         if VERBOSE:
             print(f"🔍 MONITOR: {message}")
-
+        
     def get_monitor_log(self):
         """Get the monitoring log"""
         if self.log_file.exists():
@@ -295,16 +295,16 @@ def copy_profile_safely(src: Path, dst: Path):
             i += 1
         dst = dst.parent / f"{base} ({i})"
     log(f"Copying Arc:{src.name} → Chrome:{dst.name} (skipping caches)")
-
+    
     def ignore(dir_path, names):
         # Log what we're skipping for debugging
         skipped = {n for n in names if n in SKIP_DIRS}
         if skipped:
             log(f"Skipping in {dir_path}: {', '.join(skipped)}", "!")
         return skipped
-
+    
     shutil.copytree(src, dst, symlinks=True, ignore=ignore)
-
+    
     # Verify what was actually copied
     copied_files = []
     for data_file in ["History", "Web Data", "Login Data", "Cookies", "Preferences"]:
@@ -312,7 +312,7 @@ def copy_profile_safely(src: Path, dst: Path):
             size = (dst / data_file).stat().st_size
             copied_files.append(f"{data_file}({size:,}b)")
     log(f"Copied to {dst.name}: {', '.join(copied_files) if copied_files else 'NO DATA FILES'}", "OK")
-
+    
     return dst
 
 def register_chrome_profile(dir_name: str, display_name: str):
@@ -320,7 +320,7 @@ def register_chrome_profile(dir_name: str, display_name: str):
     ls = read_json(CHROME_LOCAL_STATE)
     ls.setdefault("profile", {})
     ls["profile"].setdefault("info_cache", {})
-
+    
     # Create a more robust profile configuration that Chrome is less likely to reject
     meta = {
         "active_time": 0.0,
@@ -348,15 +348,15 @@ def register_chrome_profile(dir_name: str, display_name: str):
         "signin.with_credential_provider": False,
         "user_name": "",
     }
-
+    
     ls["profile"]["info_cache"][dir_name] = meta
-
+    
     # Also update the last_used and last_active_profiles to make Chrome recognize this profile
     ls["profile"]["last_used"] = dir_name
     ls["profile"]["last_active_profiles"] = [dir_name]
-
+    
     write_json_atomic(CHROME_LOCAL_STATE, ls, do_backup=True)
-
+    
     # Also ensure the profile's Preferences file has proper structure
     profile_prefs_path = CHROME_ROOT / dir_name / "Preferences"
     if profile_prefs_path.exists():
@@ -383,7 +383,7 @@ def register_chrome_profile(dir_name: str, display_name: str):
             write_json_atomic(profile_prefs_path, prefs, do_backup=True)
         except Exception as e:
             log(f"Warning: Could not update profile preferences for {dir_name}: {e}", "!")
-
+    
     # Create a profile lock file to prevent Chrome from deleting the profile
     lock_file = CHROME_ROOT / dir_name / ".profile_lock"
     try:
@@ -1103,89 +1103,15 @@ def write_text(path: Path, content: str):
         f.write(content)
 
 
-def export_extensions_html(arc_profile_dir: Path, out_html: Path, profile_name: str = "Arc Profile"):
-    """Export extensions to HTML format with Chrome Web Store links"""
-    # Combine preferences-based and filesystem-based detections (reusing do_extensions_mapping logic)
-    exts_pref = list_arc_extensions(arc_profile_dir)
-    exts_fs = scan_extensions_fs(arc_profile_dir)
-
-    # Deduplicate by chrome_id, prefer filesystem metadata (better i18n names)
-    dedup = {e.get("chrome_id"): e for e in exts_pref}
-    dedup.update({e.get("chrome_id"): e for e in exts_fs})
-    exts = [v for k, v in dedup.items() if k]
-
-    if not exts:
-        log(f"No extensions found in {profile_name}; skipping extensions HTML.", "!")
-        return False
-
-    # Generate HTML content
-    html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Extensions from {profile_name}</title>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        h1 {{ color: #333; }}
-        .extension {{ margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }}
-        .extension-name {{ font-weight: bold; font-size: 16px; }}
-        .extension-id {{ color: #666; font-size: 12px; font-family: monospace; }}
-        .extension-version {{ color: #888; font-size: 14px; }}
-        .chrome-link {{ color: #1a73e8; text-decoration: none; }}
-        .chrome-link:hover {{ text-decoration: underline; }}
-    </style>
-</head>
-<body>
-    <h1>Extensions from {profile_name}</h1>
-    <p>Total extensions: {len(exts)}</p>
-"""
-
-    for ext in sorted(exts, key=lambda x: x.get("name", "").lower()):
-        name = ext.get("name", "Unknown Extension")
-        chrome_id = ext.get("chrome_id", "")
-        version = ext.get("version", "")
-        homepage = ext.get("homepage_url", "")
-
-        # Chrome Web Store URL
-        chrome_store_url = f"https://chrome.google.com/webstore/detail/{chrome_id}"
-
-        html_content += f"""    <div class="extension">
-        <div class="extension-name">
-            <a href="{chrome_store_url}" class="chrome-link" target="_blank">{name}</a>
-        </div>
-        <div class="extension-id">ID: {chrome_id}</div>"""
-
-        if version:
-            html_content += f"""
-        <div class="extension-version">Version: {version}</div>"""
-
-        if homepage:
-            html_content += f"""
-        <div>Homepage: <a href="{homepage}" target="_blank">{homepage}</a></div>"""
-
-        html_content += """
-    </div>
-"""
-
-    html_content += """</body>
-</html>"""
-
-    # Write HTML file
-    ensure(out_html.parent)
-    write_text(out_html, html_content)
-    log(f"Extensions HTML → {out_html}", "OK")
-    return True
-
-
 # DEPRECATED: run_bookmarks_export_per_profile function removed
 # Use export_pinned_bookmarks from az.bookmarks instead
 
 
-def orchestrate(copy_profiles: bool, do_passwords: bool, do_cards: bool, do_bookmarks: bool, do_extensions_mapping: bool, do_cookies: bool, do_extensions_html: bool = False, experimental_extensions: bool = False):
+def orchestrate(copy_profiles: bool, do_passwords: bool, do_cards: bool, do_bookmarks: bool, do_extensions_mapping: bool, do_cookies: bool, experimental_extensions: bool = False):
     # Start monitoring Chrome profiles (silent unless VERBOSE)
     if VERBOSE:
         chrome_monitor.start_monitoring()
-
+    
     try:
         ensure(OUT_ROOT)
         ensure(PROFILES_DIR)
@@ -1212,14 +1138,14 @@ def orchestrate(copy_profiles: bool, do_passwords: bool, do_cards: bool, do_book
                 print_progress(i - 1, total, f" preparing {src.name}")
                 display_name = display_names.get(src.name, src.name)
                 log(f"Processing Arc profile {i}/{len(profiles)}: {src.name} (display: {display_name})", "OK")
-
+                
                 # Check what data files exist in this Arc profile
                 data_files = []
                 for data_file in ["History", "Web Data", "Login Data", "Cookies", "Preferences"]:
                     if (src / data_file).exists():
                         data_files.append(data_file)
                 log(f"Arc profile {src.name} contains: {', '.join(data_files) if data_files else 'no data files'}", "OK")
-
+                
                 dir_name = next_free_chrome_profile()
                 dst = CHROME_ROOT / dir_name
                 copied = copy_profile_safely(src, dst)
@@ -1240,7 +1166,7 @@ def orchestrate(copy_profiles: bool, do_passwords: bool, do_cards: bool, do_book
                     except Exception:
                         pass
                 print_progress(i, total, f" migrated {display_name}")
-
+            
             sys.stdout.write("\n")
         else:
             log("Profile copy skipped (disable default with --no-copy-profiles)", "-")
@@ -1281,18 +1207,7 @@ def orchestrate(copy_profiles: bool, do_passwords: bool, do_cards: bool, do_book
         else:
             log("Bookmarks export skipped", "-")
 
-        # 5) Extensions HTML export per profile
-        if do_extensions_html:
-            for src in profiles:
-                disp = display_names.get(src.name, src.name)
-                prof_dir = PROFILES_DIR / safe_dir_name(disp)
-                ensure(prof_dir)
-                out_html = prof_dir / f"extensions_{NOW}.html"
-                export_extensions_html(src, out_html, disp)
-        else:
-            log("Extensions HTML export skipped", "-")
-
-        # 6) Extension mapping and per-profile policies (experimental; disabled by default)
+        # 5) Extension mapping and per-profile policies (experimental; disabled by default)
         if do_extensions_mapping:
             mappings = fetch_browser_mappings()
             for prof in profiles:
@@ -1352,7 +1267,7 @@ def orchestrate(copy_profiles: bool, do_passwords: bool, do_cards: bool, do_book
             log("Cookies export skipped", "-")
 
         log("All done.", "OK")
-
+        
     except Exception as e:
         log(f"Error during orchestration: {e}", "!")
         raise
@@ -1368,7 +1283,6 @@ def parse_args(argv: list[str] | None = None):
     p.add_argument("--no-passwords", action="store_true", help="Skip passwords CSV export")
     p.add_argument("--no-cards", action="store_true", help="Skip cards reference export")
     p.add_argument("--no-bookmarks", action="store_true", help="Skip bookmarks HTML export")
-    p.add_argument("--no-extensions-html", action="store_true", help="Skip extensions HTML export")
     p.add_argument("--experimental-amo-mapping", action="store_true", help="EXPERIMENTAL: try to map extensions to AMO and write policies.json")
     p.add_argument("--import-cookies", action="store_true", help="Experimental: export Arc cookies to Firefox cookies.sqlite per profile")
     p.add_argument("--experimental-extensions", action="store_true", help="EXPERIMENTAL: attempt to preinstall Chrome extensions per profile (unstable)")
@@ -1382,7 +1296,6 @@ def main():
         do_passwords=not bool(args.no_passwords),
         do_cards=not bool(args.no_cards),
         do_bookmarks=not bool(args.no_bookmarks),
-        do_extensions_html=not bool(args.no_extensions_html),
         do_extensions_mapping=bool(args.experimental_amo_mapping),
         do_cookies=bool(args.import_cookies),
         experimental_extensions=bool(args.experimental_extensions),
