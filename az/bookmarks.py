@@ -126,6 +126,62 @@ def export_pinned_bookmarks(out_html: Path, space_title: str | None = None):
     with out_html.open("w", encoding="utf-8") as f:
         f.write(html)
 
+def _extract_today_tabs_by_space(json_data: dict, spaces: dict) -> dict:
+    """
+    Extract currently opened tabs organized by space.
+    Only includes unpinned tabs (open tabs), not pinned bookmarks.
+
+    Args:
+        json_data: The StorableSidebar.json data
+        spaces: The spaces dictionary from _get_spaces_legacy()
+
+    Returns:
+        dict mapping space names to lists of today's tabs for that space
+    """
+    tabs_by_space = {}
+    containers = json_data.get("sidebar", {}).get("containers", [])
+
+    # Create a reverse mapping from unpinned container ID to space name
+    # Only include unpinned containers for today tabs
+    container_to_space = {}
+    for container_id, space_name in spaces["unpinned"].items():
+        container_to_space[container_id] = space_name
+
+    # Look through all containers for items with tab data
+    for container in containers:
+        if isinstance(container, dict) and "items" in container:
+            items = container["items"]
+            # Items come in pairs: ID, item_data
+            for i in range(0, len(items), 2):
+                if i + 1 >= len(items):
+                    break
+
+                item_data = items[i + 1]
+                if not isinstance(item_data, dict):
+                    continue
+
+                # Check if this item has tab data and is in an unpinned container
+                if "data" in item_data and "tab" in item_data["data"]:
+                    tab = item_data["data"]["tab"]
+                    saved_title = tab.get("savedTitle", "")
+                    saved_url = tab.get("savedURL", "")
+                    parent_id = item_data.get("parentID", "")
+
+                    if saved_title and saved_url and parent_id:
+                        # Only include tabs from unpinned containers (actual open tabs)
+                        space_name = container_to_space.get(parent_id)
+                        if space_name:
+                            if space_name not in tabs_by_space:
+                                tabs_by_space[space_name] = []
+
+                            tabs_by_space[space_name].append({
+                                "title": saved_title,
+                                "type": "bookmark",
+                                "url": saved_url,
+                            })
+
+    return tabs_by_space
+
 def _convert_json_to_html_legacy(json_data: dict, space_titles: list[str] | None = None) -> str:
     containers = json_data["sidebar"]["containers"]
     try:
@@ -136,7 +192,11 @@ def _convert_json_to_html_legacy(json_data: dict, space_titles: list[str] | None
     spaces = _get_spaces_legacy(json_data["sidebar"]["containers"][target]["spaces"])
     items = json_data["sidebar"]["containers"][target]["items"]
 
-    bookmarks = _convert_to_bookmarks_legacy(spaces, items, space_titles)
+    # Extract today's tabs organized by space
+    tabs_by_space = _extract_today_tabs_by_space(json_data, spaces)
+
+    bookmarks = _convert_to_bookmarks_legacy(spaces, items, space_titles, tabs_by_space)
+
     return _convert_bookmarks_to_html_legacy(bookmarks)
 
 def _get_spaces_legacy(spaces: list) -> dict:
@@ -154,7 +214,7 @@ def _get_spaces_legacy(spaces: list) -> dict:
                         spaces_names["unpinned"][str(containers[i + 1])] = title
     return spaces_names
 
-def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[str] | None) -> dict:
+def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[str] | None, tabs_by_space: dict) -> dict:
     bookmarks = {"bookmarks": []}
     item_dict = {item["id"]: item for item in items if isinstance(item, dict)}
 
@@ -182,12 +242,27 @@ def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[s
         # If space_titles is provided, only export spaces that match
         if space_titles is not None and space_name not in space_titles:
             continue
+
+        # Get the regular bookmarks for this space
+        space_children = recurse_into_children(space_id)
+
+        # Add "Today tabs" subfolder if there are open tabs for this space
+        if space_name in tabs_by_space and tabs_by_space[space_name]:
+            today_tabs_folder = {
+                "title": "Today tabs",
+                "type": "folder",
+                "children": tabs_by_space[space_name],
+            }
+            # Insert "Today tabs" at the beginning
+            space_children.insert(0, today_tabs_folder)
+
         space_folder = {
             "title": space_name,
             "type": "folder",
-            "children": recurse_into_children(space_id),
+            "children": space_children,
         }
         bookmarks["bookmarks"].append(space_folder)
+
     # No fallback - if filter produced nothing, return empty bookmarks
     # This ensures profile isolation and prevents combining bookmarks from all profiles
     return bookmarks
