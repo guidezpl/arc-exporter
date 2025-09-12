@@ -126,6 +126,143 @@ def export_pinned_bookmarks(out_html: Path, space_title: str | None = None):
     with out_html.open("w", encoding="utf-8") as f:
         f.write(html)
 
+def _extract_today_tabs_by_space(json_data: dict, spaces: dict) -> dict:
+    """
+    Extract currently opened tabs organized by space.
+    Only includes unpinned tabs (open tabs), not pinned bookmarks.
+    Handles both individual tabs and tabGroups (subfolders).
+
+    Args:
+        json_data: The StorableSidebar.json data
+        spaces: The spaces dictionary from _get_spaces_legacy()
+
+    Returns:
+        dict mapping space names to lists of today's tabs for that space
+    """
+    tabs_by_space = {}
+    containers = json_data.get("sidebar", {}).get("containers", [])
+
+    if len(containers) < 2:
+        return tabs_by_space
+
+    # Get the main container that holds all items
+    main_container = containers[1]
+    if not isinstance(main_container, dict) or "items" not in main_container:
+        return tabs_by_space
+
+    items_list = main_container["items"]
+
+    # Build item dictionary for fast lookup
+    item_dict = {}
+    for i in range(0, len(items_list), 2):
+        if i + 1 >= len(items_list):
+            break
+        item_id = items_list[i]
+        item_data = items_list[i + 1]
+        if isinstance(item_data, dict):
+            item_dict[item_id] = item_data
+
+    # Helper function to recursively extract tabs from containers and tabGroups
+    def extract_tabs_from_container(container_id: str, space_name: str) -> list:
+        """Extract tabs from a container, handling both individual tabs and tabGroups."""
+        result = []
+
+        if container_id not in item_dict:
+            return result
+
+        container_item = item_dict[container_id]
+        children_ids = container_item.get("childrenIds", [])
+
+        for child_id in children_ids:
+            if child_id not in item_dict:
+                continue
+
+            child_item = item_dict[child_id]
+
+            if "data" not in child_item:
+                continue
+
+            child_data = child_item["data"]
+
+            # Handle individual tabs
+            if "tab" in child_data:
+                tab = child_data["tab"]
+                saved_title = tab.get("savedTitle", "")
+                saved_url = tab.get("savedURL", "")
+
+                if saved_title and saved_url:
+                    result.append({
+                        "title": saved_title,
+                        "type": "bookmark",
+                        "url": saved_url,
+                    })
+
+            # Handle tabGroups (subfolders)
+            elif "tabGroup" in child_data:
+                tabgroup = child_data["tabGroup"]
+                folder_title = tabgroup.get("title", child_item.get("title", "Unnamed Folder"))
+
+                # Recursively extract tabs from the tabGroup
+                folder_tabs = []
+                tabgroup_children_ids = child_item.get("childrenIds", [])
+
+                for tab_id in tabgroup_children_ids:
+                    if tab_id not in item_dict:
+                        continue
+
+                    tab_item = item_dict[tab_id]
+
+                    # Handle direct tabs
+                    if "data" in tab_item and "tab" in tab_item["data"]:
+                        tab = tab_item["data"]["tab"]
+                        saved_title = tab.get("savedTitle", "")
+                        saved_url = tab.get("savedURL", "")
+
+                        if saved_title and saved_url:
+                            folder_tabs.append({
+                                "title": saved_title,
+                                "type": "bookmark",
+                                "url": saved_url,
+                            })
+
+                    # Handle splitView items (which contain tabs as children)
+                    elif "data" in tab_item and "splitView" in tab_item["data"]:
+                        splitview_children_ids = tab_item.get("childrenIds", [])
+                        for splitview_child_id in splitview_children_ids:
+                            if splitview_child_id not in item_dict:
+                                continue
+
+                            splitview_child = item_dict[splitview_child_id]
+                            if "data" in splitview_child and "tab" in splitview_child["data"]:
+                                tab = splitview_child["data"]["tab"]
+                                saved_title = tab.get("savedTitle", "")
+                                saved_url = tab.get("savedURL", "")
+
+                                if saved_title and saved_url:
+                                    folder_tabs.append({
+                                        "title": saved_title,
+                                        "type": "bookmark",
+                                        "url": saved_url,
+                                    })
+
+                # Add the folder with its tabs if it has any tabs
+                if folder_tabs:
+                    result.append({
+                        "title": folder_title,
+                        "type": "folder",
+                        "children": folder_tabs,
+                    })
+
+        return result
+
+    # Extract tabs for each space's unpinned container
+    for container_id, space_name in spaces["unpinned"].items():
+        space_tabs = extract_tabs_from_container(container_id, space_name)
+        if space_tabs:
+            tabs_by_space[space_name] = space_tabs
+
+    return tabs_by_space
+
 def _convert_json_to_html_legacy(json_data: dict, space_titles: list[str] | None = None) -> str:
     containers = json_data["sidebar"]["containers"]
     try:
@@ -136,7 +273,11 @@ def _convert_json_to_html_legacy(json_data: dict, space_titles: list[str] | None
     spaces = _get_spaces_legacy(json_data["sidebar"]["containers"][target]["spaces"])
     items = json_data["sidebar"]["containers"][target]["items"]
 
-    bookmarks = _convert_to_bookmarks_legacy(spaces, items, space_titles)
+    # Extract today's tabs organized by space
+    tabs_by_space = _extract_today_tabs_by_space(json_data, spaces)
+
+    bookmarks = _convert_to_bookmarks_legacy(spaces, items, space_titles, tabs_by_space)
+
     return _convert_bookmarks_to_html_legacy(bookmarks)
 
 def _get_spaces_legacy(spaces: list) -> dict:
@@ -154,7 +295,7 @@ def _get_spaces_legacy(spaces: list) -> dict:
                         spaces_names["unpinned"][str(containers[i + 1])] = title
     return spaces_names
 
-def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[str] | None) -> dict:
+def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[str] | None, tabs_by_space: dict) -> dict:
     bookmarks = {"bookmarks": []}
     item_dict = {item["id"]: item for item in items if isinstance(item, dict)}
 
@@ -182,12 +323,27 @@ def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[s
         # If space_titles is provided, only export spaces that match
         if space_titles is not None and space_name not in space_titles:
             continue
+
+        # Get the regular bookmarks for this space
+        space_children = recurse_into_children(space_id)
+
+        # Add "Today Tabs" subfolder if there are open tabs for this space
+        if space_name in tabs_by_space and tabs_by_space[space_name]:
+            today_tabs_folder = {
+                "title": "Today Tabs",
+                "type": "folder",
+                "children": tabs_by_space[space_name],
+            }
+            # Insert "Today Tabs" at the beginning
+            space_children.insert(0, today_tabs_folder)
+
         space_folder = {
             "title": space_name,
             "type": "folder",
-            "children": recurse_into_children(space_id),
+            "children": space_children,
         }
         bookmarks["bookmarks"].append(space_folder)
+
     # No fallback - if filter produced nothing, return empty bookmarks
     # This ensures profile isolation and prevents combining bookmarks from all profiles
     return bookmarks
