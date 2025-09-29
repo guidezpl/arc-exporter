@@ -297,25 +297,61 @@ def _get_spaces_legacy(spaces: list) -> dict:
 
 def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[str] | None, tabs_by_space: dict) -> dict:
     bookmarks = {"bookmarks": []}
-    item_dict = {item["id"]: item for item in items if isinstance(item, dict)}
-
+    
+    # Create a dictionary for item lookup
+    # Arc's items list structure is [id1, data1, id2, data2, ...]
+    item_dict = {}
+    for i in range(0, len(items), 2):
+        if i + 1 >= len(items):
+            break
+        item_id = items[i]
+        item_data = items[i + 1]
+        if isinstance(item_data, dict):
+            item_dict[item_id] = item_data
+    
+    # Get parent-child relationships while preserving order
+    parent_child_map = {}
+    for item_id, item in item_dict.items():
+        if "childrenIds" in item and isinstance(item["childrenIds"], list):
+            # Save children in the exact order they appear in childrenIds
+            parent_child_map[item_id] = item["childrenIds"]
+    
     def recurse_into_children(parent_id: str) -> list:
         children = []
-        for item_id, item in item_dict.items():
-            if item.get("parentID") == parent_id:
-                if "data" in item and "tab" in item["data"]:
+        
+        # Get the ordered list of children for this parent
+        child_ids = parent_child_map.get(parent_id, [])
+        
+        for child_id in child_ids:
+            if child_id not in item_dict:
+                continue
+                
+            child_item = item_dict[child_id]
+            
+            # Handle bookmark/tab
+            if "data" in child_item and "tab" in child_item["data"]:
+                tab = child_item["data"]["tab"]
+                title = child_item.get("title") or tab.get("savedTitle", "")
+                url = tab.get("savedURL", "")
+                
+                if title and url:
                     children.append({
-                        "title": item.get("title") or item["data"]["tab"].get("savedTitle", ""),
+                        "title": title,
                         "type": "bookmark",
-                        "url": item["data"]["tab"].get("savedURL", ""),
+                        "url": url
                     })
-                elif "title" in item:
-                    child_folder = {
-                        "title": item["title"],
+            # Handle folders
+            elif "title" in child_item:
+                folder_title = child_item["title"]
+                folder_children = recurse_into_children(child_id)
+                
+                if folder_title and folder_children:
+                    children.append({
+                        "title": folder_title,
                         "type": "folder",
-                        "children": recurse_into_children(item_id),
-                    }
-                    children.append(child_folder)
+                        "children": folder_children
+                    })
+        
         return children
 
     for space_id, space_name in spaces["pinned"].items():
