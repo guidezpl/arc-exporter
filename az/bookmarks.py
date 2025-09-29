@@ -196,7 +196,7 @@ def _extract_today_tabs_by_space(json_data: dict, spaces: dict) -> dict:
                         "type": "bookmark",
                         "url": saved_url,
                     })
-            
+
             # Handle top-level splitView items (which contain tabs as children)
             elif "splitView" in child_data:
                 splitview_children_ids = child_item.get("childrenIds", [])
