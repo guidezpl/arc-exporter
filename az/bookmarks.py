@@ -360,6 +360,26 @@ def _convert_to_bookmarks_legacy(spaces: dict, items: list, space_titles: list[s
                         "type": "bookmark",
                         "url": url
                     })
+            # Handle split view items (which contain tabs as children)
+            elif "data" in child_item and "splitView" in child_item["data"]:
+                # Process tabs within the split view
+                splitview_children_ids = child_item.get("childrenIds", [])
+                for splitview_child_id in splitview_children_ids:
+                    if splitview_child_id not in item_dict:
+                        continue
+
+                    splitview_child = item_dict[splitview_child_id]
+                    if "data" in splitview_child and "tab" in splitview_child["data"]:
+                        tab = splitview_child["data"]["tab"]
+                        title = splitview_child.get("title") or tab.get("savedTitle", "")
+                        url = tab.get("savedURL", "")
+
+                        if title and url:
+                            children.append({
+                                "title": title,
+                                "type": "bookmark",
+                                "url": url
+                            })
             # Handle folders
             elif "title" in child_item:
                 folder_title = child_item["title"]
